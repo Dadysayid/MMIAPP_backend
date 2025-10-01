@@ -644,7 +644,6 @@ async function generateAccusePDF(demande, user) {
     throw new Error(`Erreur de génération PDF: ${error.message}`);
   }
 }
-
 // =================== ROUTES MINISTRE ===================
 // Signature et envoi automatique au demandeur
 app.post(
@@ -1441,7 +1440,6 @@ const generateReferenceMiddleware = async (req, res, next) => {
     });
   }
 };
-
 // =================== ROUTES DEMANDES ===================
 // =================== Nouvelle demande ===================
 // =================== Nouvelle demande ===================
@@ -2920,7 +2918,6 @@ app.get(
     }
   }
 );
-
 // Route pour générer le document d'enregistrement avec adresse dynamique
 app.get("/api/demandes/:id/document-enregistrement", async (req, res) => {
   const demandeId = req.params.id;
@@ -3544,24 +3541,26 @@ app.post("/api/login/secretaire-general", async (req, res) => {
 // Liste des demandes à traiter (statut RECEPTIONNEE ou TRANSMISE)
 app.get("/api/demandes-a-traiter", authSecretaireGeneral, async (req, res) => {
   try {
+    console.log('🔄 [Secrétaire Général] Récupération des demandes à traiter');
     const conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(`
       SELECT 
         d.id, 
         d.reference, 
-        COALESCE(u.nom, '—') AS demandeur_nom, 
-        d.created_at AS date, 
+        CONCAT(u.nom_responsable, ' ', u.prenom_responsable) AS nom_demandeur, 
+        d.created_at AS date_demande, 
         d.statut
-      FROM demandes d
-      LEFT JOIN utilisateurs u ON u.id = d.utilisateur_id
-      WHERE d.statut IN ('RECEPTIONNEE', 'TRANSMISE')
-      ORDER BY d.created_at DESC
+       FROM demandes d
+       LEFT JOIN utilisateurs u ON u.id = d.utilisateur_id
+       WHERE d.statut IN ('RECEPTIONNEE', 'TRANSMISE_AU_SG', 'TRANSMISE', 'RETOURNEE', 'RETOURNEE_SG')
+       ORDER BY d.created_at DESC
     `);
     await conn.end();
+    console.log(`✅ [Secrétaire Général] ${rows.length} demandes récupérées`);
     res.json({ demandes: rows });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error('❌ [Secrétaire Général] Erreur /api/demandes-a-traiter:', err);
+    res.status(500).json({ error: "Erreur serveur: " + err.message });
   }
 });
 
@@ -3571,7 +3570,11 @@ app.get("/api/demande/:id", authSecretaireGeneral, async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(
-      `SELECT d.*, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom, u.email AS demandeur_email, u.telephone AS demandeur_telephone, u.adresse_siege AS demandeur_adresse
+      `SELECT d.*, 
+              CONCAT(u.nom_responsable, ' ', u.prenom_responsable) AS nom_demandeur,
+              u.nom_responsable AS demandeur_nom,
+              u.prenom_responsable AS demandeur_prenom,
+              u.email AS demandeur_email, u.telephone AS demandeur_telephone, u.adresse_siege AS demandeur_adresse
        FROM demandes d
        JOIN utilisateurs u ON d.utilisateur_id = u.id
        WHERE d.id = ?`,
@@ -3584,6 +3587,45 @@ app.get("/api/demande/:id", authSecretaireGeneral, async (req, res) => {
     demande.fichiers = demande.fichiers ? JSON.parse(demande.fichiers) : null;
     res.json({ demande });
   } catch (err) {
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// Liste des fichiers uploads d'une demande (Secrétaire Général)
+app.get("/api/demande/:id/documents", authSecretaireGeneral, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const conn = await mysql.createConnection(dbConfig);
+    const [[demande]] = await conn.execute(
+      "SELECT reference FROM demandes WHERE id = ?",
+      [id]
+    );
+    await conn.end();
+
+    if (!demande) {
+      return res.status(404).json({ error: "Demande introuvable" });
+    }
+
+    const reference = demande.reference;
+    const folderPath = path.join(__dirname, "uploads", reference);
+
+    if (!fs.existsSync(folderPath)) {
+      return res.json({ documents: [] });
+    }
+
+    const files = fs
+      .readdirSync(folderPath)
+      .filter((file) => fs.statSync(path.join(folderPath, file)).isFile())
+      .map((file) => ({
+        name: file,
+        url: `${process.env.APP_URL || "http://localhost:4000"}/uploads/${reference}/${encodeURIComponent(
+          file
+        )}`,
+      }));
+
+    res.json({ documents: files });
+  } catch (err) {
+    console.error("Erreur documents SG:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
@@ -3645,7 +3687,6 @@ app.post(
     }
   }
 );
-
 // Transmettre une demande à la DGI (mise à jour statut + historique)
 app.post(
   "/api/demande/:id/transmettre-dgi",
@@ -3714,13 +3755,33 @@ app.get(
     try {
       const conn = await mysql.createConnection(dbConfig);
       const [rows] = await conn.execute(
-        `SELECT s.id, d.reference AS demande_reference, s.date_action, u.nom AS utilisateur_nom,
-              s.nouveau_statut, s.message
-       FROM suivi_demandes s
-       JOIN demandes d ON s.demande_id = d.id
-       JOIN utilisateurs u ON s.utilisateur_id = u.id
-       WHERE s.action = 'TRANSMISSION'
-       ORDER BY s.date_action DESC`
+        `SELECT 
+            s.id,
+            d.reference AS reference_demande,
+            s.date_action,
+            CASE
+              WHEN s.action LIKE 'TRANSMISSION%' THEN 'Transmission'
+              WHEN s.action LIKE 'APPROBATION%' THEN 'Approbation'
+              WHEN s.action LIKE 'REJ%' THEN 'Rejet'
+              ELSE s.action
+            END AS action,
+            CASE
+              WHEN s.nouveau_statut = 'TRANSMISE_AU_MINISTRE' THEN 'Ministre'
+              WHEN s.nouveau_statut = 'TRANSMISE_AU_DGI' THEN 'DGI'
+              WHEN s.nouveau_statut = 'TRANSMISE_AU_SG' THEN 'Secrétariat Général'
+              WHEN s.nouveau_statut = 'TRANSMISE_AU_DDPI' THEN 'DDPI'
+              WHEN s.nouveau_statut = 'TRANSMISE_AU_DR' THEN 'Direction Régionale'
+              WHEN s.nouveau_statut = 'APPROUVEE' THEN 'Approbation'
+              ELSE COALESCE(s.message, 'N/A')
+            END AS destinataire,
+            CONCAT(u.nom_responsable, ' ', u.prenom_responsable) AS nom_utilisateur
+         FROM suivi_demandes s
+         JOIN demandes d ON s.demande_id = d.id
+         JOIN utilisateurs u ON s.utilisateur_id = u.id
+         WHERE s.action LIKE 'TRANSMISSION%'
+            OR s.action LIKE 'APPROV%'
+            OR s.action LIKE 'REJET%'
+         ORDER BY s.date_action DESC`
       );
       await conn.end();
       res.json({ historique: rows });
@@ -4416,7 +4477,6 @@ app.get("/api/dgi/demandes", authDGI, async (req, res) => {
     res.status(500).json({ error: "Erreur demandes DGI" });
   }
 });
-
 // Commentaire DGI
 app.post("/api/dgi/demandes/:id/commentaire", authDGI, async (req, res) => {
   const demandeId = req.params.id;
@@ -5168,7 +5228,6 @@ app.post("/api/dgi/demandes/:id/reprendre", authDGI, async (req, res) => {
     res.status(500).json({ error: "Erreur lors de la reprise" });
   }
 });
-
 // POST /api/dgi/demandes/:id/rejeter - Rejeter définitivement une demande
 app.post("/api/dgi/demandes/:id/rejeter", authDGI, async (req, res) => {
   const demandeId = req.params.id;
@@ -5938,7 +5997,6 @@ app.post("/api/dgi/demandes/:id/reprendre", authDGI, async (req, res) => {
     res.status(500).json({ error: "Erreur lors de la reprise" });
   }
 });
-
 // Rejeter une demande
 app.post("/api/dgi/demandes/:id/rejeter", authDGI, async (req, res) => {
   const demandeId = req.params.id;
@@ -6728,9 +6786,7 @@ app.post(
     }
   }
 );
-
 //=== Variantes==============================
-
 // POST /api/demandes/:id/rejeter
 app.post("/api/demandes/:id/rejeter", authRole([4, 5, 6]), async (req, res) => {
   const demandeId = req.params.id;
@@ -7419,7 +7475,6 @@ app.post(
     }
   }
 );
-
 // Fonction pour générer le PDF de prévisualisation
 async function generatePreviewPDF(demande, signatureData) {
   return new Promise(async (resolve, reject) => {
@@ -8183,7 +8238,6 @@ app.delete("/api/ministere/signatures/:id", authMinistre, async (req, res) => {
       .json({ error: "Erreur lors de la suppression de la signature" });
   }
 });
-
 // Appliquer une signature à un document
 app.post(
   "/api/ministere/signatures/:id/appliquer",
@@ -8953,7 +9007,6 @@ app.post("/api/pnme/demandes/:id/rejeter", authPNME, async (req, res) => {
     res.status(500).json({ error: "Erreur lors du rejet" });
   }
 });
-
 // Demander des compléments d'informations
 app.post("/api/pnme/demandes/:id/complement", authPNME, async (req, res) => {
   const { id } = req.params;
@@ -9744,7 +9797,6 @@ app.get(
     }
   }
 );
-
 // POST /api/demandes/:id/avis-multisectoriel - Demande d'avis multisectoriel
 app.post(
   "/api/demandes/:id/avis-multisectoriel",
