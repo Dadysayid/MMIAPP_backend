@@ -662,7 +662,7 @@ app.post(
 
       // Vérifier que la demande existe et est transmise au Ministre
       const [demandeResult] = await conn.execute(
-        "SELECT d.*, u.email, u.nom_responsable, u.prenom_responsable FROM demandes d JOIN utilisateurs u ON d.utilisateur_id = u.id WHERE d.id = ?",
+        "SELECT d.*, u.email, u.nom_responsable, u.prenom_responsable, u.telephone, u.adresse_siege FROM demandes d JOIN utilisateurs u ON d.utilisateur_id = u.id WHERE d.id = ?",
         [demandeId]
       );
 
@@ -733,10 +733,11 @@ app.post(
 
       // 🔔 NOTIFICATION AUTOMATIQUE AU DEMANDEUR
       await conn.execute(
-        'INSERT INTO notifications (utilisateur_id, type, message, lu, created_at) VALUES (?, "AUTORISATION_SIGNEE", ?, 0, NOW())',
+        'INSERT INTO notifications (utilisateur_id, type, message, lu, created_at, lien) VALUES (?, "AUTORISATION_SIGNEE", ?, 0, NOW(), ?)',
         [
           demande.utilisateur_id,
-          `Félicitations ! Votre demande ${demande.reference} a été approuvée et signée par le Ministre. Vous pouvez maintenant télécharger votre autorisation officielle.`,
+          `🎉 Félicitations ! Votre autorisation ${demande.reference} a été signée par le ministre et est maintenant disponible pour téléchargement.`,
+          autorisationBuffer
         ]
       );
 
@@ -830,7 +831,7 @@ app.get("/api/demandeur/autorisation/:id", authRole([4]), async (req, res) => {
     // Vérifier que la demande appartient au demandeur et est signée
     const [demandes] = await conn.execute(
       `
-      SELECT d.*, u.nom_responsable, u.prenom_responsable, u.email, u.telephone, u.adresse
+      SELECT d.*, u.nom_responsable, u.prenom_responsable, u.email, u.telephone, u.adresse_siege
       FROM demandes d
       JOIN utilisateurs u ON d.utilisateur_id = u.id
       WHERE d.id = ? AND d.utilisateur_id = ? AND d.statut = 'AUTORISATION_SIGNEE'
@@ -1376,20 +1377,20 @@ app.post("/api/reset-password/:token", async (req, res) => {
 
 // Liste des demandes du demandeur
 app.get("/api/mes-demandes", async (req, res) => {
-  const user_id = req.query.user_id;
-  if (!user_id) return res.status(400).json({ error: "user_id requis" });
+  const utilisateurId = req.query.utilisateur_id || req.query.user_id;
+  if (!utilisateurId) return res.status(400).json({ error: "utilisateur_id requis" });
 
   try {
-    console.log(`📋 [mes-demandes] Récupération pour utilisateur ${user_id}`);
+    console.log(`📋 [mes-demandes] Récupération pour utilisateur ${utilisateurId}`);
 
     const conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(
       `SELECT d.id, d.reference, d.type, d.created_at, d.updated_at, d.statut, 
-              d.fichiers, d.fichier_accuse, d.lien_autorisation, d.motif_rejet
+             d.fichiers, d.fichier_accuse, d.lien_autorisation, d.autorisation_pdf, d.motif_rejet
        FROM demandes d
        WHERE d.utilisateur_id = ?
        ORDER BY d.updated_at DESC, d.created_at DESC`,
-      [user_id]
+      [utilisateurId]
     );
     await conn.end();
 
@@ -1399,7 +1400,7 @@ app.get("/api/mes-demandes", async (req, res) => {
     }));
 
     console.log(
-      `✅ [mes-demandes] ${demandes.length} demandes récupérées pour utilisateur ${user_id}`
+      `✅ [mes-demandes] ${demandes.length} demandes récupérées pour utilisateur ${utilisateurId}`
     );
     console.log(
       `📊 [mes-demandes] Statuts trouvés: ${[
@@ -2932,7 +2933,7 @@ app.get("/api/demandes/:id/document-enregistrement", async (req, res) => {
 
     // Récupérer les détails de la demande et du demandeur
     const [[demande]] = await conn.execute(
-      "SELECT d.*, u.nom, u.prenom, u.email, u.telephone, u.adresse, u.adresse_siege FROM demandes d JOIN utilisateurs u ON d.utilisateur_id = u.id WHERE d.id = ? AND u.id = ?",
+      "SELECT d.*, u.nom_responsable, u.prenom_responsable, u.email, u.telephone, u.adresse_siege FROM demandes d JOIN utilisateurs u ON d.utilisateur_id = u.id WHERE d.id = ? AND u.id = ?",
       [demandeId, user_id]
     );
 
@@ -2986,7 +2987,7 @@ app.get("/api/demandes/:id/document-enregistrement", async (req, res) => {
     doc
       .font("Helvetica-Bold")
       .fillColor("#1890ff")
-      .text(`l'**Ets ${demande.nom} ${demande.prenom}**`);
+      .text(`l'**Ets ${demande.nom_responsable} ${demande.prenom_responsable}**`);
 
     doc
       .font("Helvetica")
@@ -3471,7 +3472,7 @@ app.get("/api/demandes/accuses-reception", authSecretaire, async (req, res) => {
   try {
     conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(
-      `SELECT d.id, d.reference, u.nom AS demandeur_nom, u.email AS demandeur_email, u.telephone AS demandeur_telephone, u.adresse_siege AS demandeur_adresse,
+      `SELECT d.id, d.reference, u.nom_responsable AS demandeur_nom, u.email AS demandeur_email, u.telephone AS demandeur_telephone, u.adresse_siege AS demandeur_adresse,
               d.created_at AS date, d.statut, d.fichier_accuse
        FROM demandes d
        JOIN utilisateurs u ON d.utilisateur_id = u.id
@@ -5624,7 +5625,7 @@ app.get("/api/dgi/recherche", authDGI, async (req, res) => {
     const conn = await mysql.createConnection(dbConfig);
 
     let whereClause =
-      "WHERE (d.reference LIKE ? OR u.nom LIKE ? OR u.prenom LIKE ? OR u.email LIKE ?)";
+      "WHERE (d.reference LIKE ? OR u.nom_responsable LIKE ? OR u.prenom_responsable LIKE ? OR u.email LIKE ?)";
     const params = [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`];
 
     if (type) {
@@ -5645,7 +5646,7 @@ app.get("/api/dgi/recherche", authDGI, async (req, res) => {
       SELECT 
         d.id, d.reference, d.type, d.statut, d.created_at,
         JSON_UNQUOTE(JSON_EXTRACT(d.donnees, '$.secteur')) as secteur,
-        u.nom, u.prenom, u.email
+        u.nom_responsable, u.prenom_responsable, u.email
       FROM demandes d
       JOIN utilisateurs u ON d.utilisateur_id = u.id
       ${whereClause}
@@ -5780,7 +5781,7 @@ app.get("/api/dgi/export-rapport-pdf", authDGI, async (req, res) => {
       SELECT 
         d.reference, d.type, d.statut, d.created_at, d.updated_at,
         JSON_UNQUOTE(JSON_EXTRACT(d.donnees, '$.secteur')) as secteur,
-        u.nom, u.prenom, u.email
+        u.nom_responsable, u.prenom_responsable, u.email
       FROM demandes d
       JOIN utilisateurs u ON d.utilisateur_id = u.id
       ${whereClause}
@@ -6278,8 +6279,6 @@ app.post("/api/dgi/demandes/:id/rapport-visite", authDGI, async (req, res) => {
   }
 });
 
-// Endpoint de réattribution supprimé - conflit avec l'endpoint principal
-
 // Clôturer une demande
 app.post("/api/demandes/:id/cloturer", authDGI, async (req, res) => {
   const demandeId = req.params.id;
@@ -6372,7 +6371,7 @@ app.get("/api/dgi/demandes-par-statut/:statut", authDGI, async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [demandes] = await conn.execute(
-      `SELECT d.*, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom, u.email AS demandeur_email
+      `SELECT d.*, u.nom_responsable AS demandeur_nom, u.prenom_responsable AS demandeur_prenom, u.email AS demandeur_email
        FROM demandes d
        JOIN utilisateurs u ON d.utilisateur_id = u.id
        WHERE d.statut = ?
@@ -6557,7 +6556,7 @@ app.get("/api/chef-service/demandes", authChefService, async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(
-      `SELECT d.id, d.reference, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom, d.statut, d.created_at, d.type, d.donnees
+      `SELECT d.id, d.reference, u.nom_responsable AS demandeur_nom, u.prenom_responsable AS demandeur_prenom, d.statut, d.created_at, d.type, d.donnees
        FROM demandes d
        JOIN utilisateurs u ON d.utilisateur_id = u.id
        WHERE d.statut IN ('REÇUE', 'TRANSMISE_CHEF', 'VALIDEE_CHEF', 'RETOURNEE')
@@ -6786,7 +6785,6 @@ app.post(
     }
   }
 );
-//=== Variantes==============================
 // POST /api/demandes/:id/rejeter
 app.post("/api/demandes/:id/rejeter", authRole([4, 5, 6]), async (req, res) => {
   const demandeId = req.params.id;
@@ -7136,7 +7134,7 @@ app.get("/api/commission/dossiers", authCommission, async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(
-      `SELECT d.id, d.reference, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom, d.statut, d.created_at, d.type, d.donnees
+      `SELECT d.id, d.reference, u.nom_responsable AS demandeur_nom, u.prenom_responsable AS demandeur_prenom, d.statut, d.created_at, d.type, d.donnees
        FROM demandes d
        JOIN utilisateurs u ON d.utilisateur_id = u.id
        WHERE d.statut IN ('EN_ATTENTE_AVIS_COMMISSION','EN_ATTENTE_AVIS_COMITE')
@@ -7278,7 +7276,7 @@ app.get("/api/ministere/dossiers", authMinistre, async (req, res) => {
       `SELECT d.id, d.reference, u.nom_responsable AS demandeur_nom, u.prenom_responsable AS demandeur_prenom, d.statut, d.created_at, d.type, d.donnees
        FROM demandes d
        JOIN utilisateurs u ON d.utilisateur_id = u.id
-       WHERE d.statut = 'TRANSMISE_AU_MINISTRE'
+       WHERE d.statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE', 'AUTORISATION_SIGNEE')
        ORDER BY d.created_at DESC LIMIT 50`
     );
     await conn.end();
@@ -7304,14 +7302,14 @@ app.get("/api/ministere/stats", authMinistre, async (req, res) => {
     const [totalResult] = await conn.execute(`
       SELECT COUNT(*) as total
       FROM demandes
-      WHERE statut = 'TRANSMISE_AU_MINISTRE'
+      WHERE statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE', 'AUTORISATION_SIGNEE')
     `);
 
     // Dossiers en attente de signature
     const [enAttenteResult] = await conn.execute(`
       SELECT COUNT(*) as en_attente
       FROM demandes
-      WHERE statut = 'TRANSMISE_AU_MINISTRE'
+      WHERE statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE')
     `);
 
     // Dossiers signés et clôturés
@@ -7330,7 +7328,7 @@ app.get("/api/ministere/stats", authMinistre, async (req, res) => {
     const [urgentResult] = await conn.execute(`
       SELECT COUNT(*) as urgent
       FROM demandes
-      WHERE statut = 'TRANSMISE_AU_MINISTRE'
+      WHERE statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE')
       AND DATEDIFF(NOW(), updated_at) > 7
     `);
 
@@ -7393,10 +7391,10 @@ app.post(
       const [demandes] = await Promise.race([
         conn.execute(
           `
-        SELECT d.*, u.nom_responsable, u.prenom_responsable, u.email, u.telephone, u.adresse
+        SELECT d.*, u.nom_responsable, u.prenom_responsable, u.email, u.telephone, u.adresse_siege
         FROM demandes d
         JOIN utilisateurs u ON d.utilisateur_id = u.id
-        WHERE d.id = ? AND d.statut = 'TRANSMISE_AU_MINISTRE'
+        WHERE d.id = ? AND d.statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE', 'AUTORISATION_SIGNEE')
       `,
           [id]
         ),
@@ -9250,7 +9248,7 @@ app.get("/api/ministere/notifications", authMinistre, async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [notifications] = await conn.execute(`
-      SELECT n.*, d.reference, d.type, u.nom as demandeur_nom, u.prenom as demandeur_prenom
+      SELECT n.*, d.reference, d.type, u.nom_responsable as demandeur_nom, u.prenom_responsable as demandeur_prenom
       FROM notifications n
       LEFT JOIN demandes d ON n.demande_id = d.id
       LEFT JOIN utilisateurs u ON d.utilisateur_id = u.id
@@ -9270,11 +9268,11 @@ app.get("/api/ministere/dossiers", authMinistre, async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [dossiers] = await conn.execute(`
-      SELECT d.*, u.nom as demandeur_nom, u.prenom as demandeur_prenom, u.email as demandeur_email,
-             u.telephone as demandeur_telephone, u.adresse as demandeur_adresse
+      SELECT d.*, u.nom_responsable as demandeur_nom, u.prenom_responsable as demandeur_prenom, u.email as demandeur_email,
+             u.telephone as demandeur_telephone, u.adresse_siege as demandeur_adresse
       FROM demandes d
       JOIN utilisateurs u ON d.utilisateur_id = u.id
-      WHERE d.statut = 'TRANSMISE_AU_MINISTRE'
+      WHERE d.statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE', 'AUTORISATION_SIGNEE')
       ORDER BY d.created_at DESC
     `);
     await conn.end();
@@ -9290,11 +9288,11 @@ app.get("/api/ministere/dossiers/:id", authMinistre, async (req, res) => {
     const conn = await mysql.createConnection(dbConfig);
     const [dossier] = await conn.execute(
       `
-      SELECT d.*, u.nom as demandeur_nom, u.prenom as demandeur_prenom, u.email as demandeur_email,
-             u.telephone as demandeur_telephone, u.adresse as demandeur_adresse
+      SELECT d.*, u.nom_responsable as demandeur_nom, u.prenom_responsable as demandeur_prenom, u.email as demandeur_email,
+             u.telephone as demandeur_telephone, u.adresse_siege as demandeur_adresse
       FROM demandes d
       JOIN utilisateurs u ON d.utilisateur_id = u.id
-      WHERE d.id = ? AND d.statut = 'TRANSMISE_AU_MINISTRE'
+      WHERE d.id = ? AND d.statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE', 'AUTORISATION_SIGNEE')
     `,
       [req.params.id]
     );
@@ -9325,10 +9323,10 @@ app.post(
       // Vérifier que le dossier existe et est en attente de signature
       const [dossier] = await conn.execute(
         `
-      SELECT d.*, u.nom as demandeur_nom, u.prenom as demandeur_prenom, u.email as demandeur_email
+      SELECT d.*, u.nom_responsable as demandeur_nom, u.prenom_responsable as demandeur_prenom, u.email as demandeur_email
       FROM demandes d
       JOIN utilisateurs u ON d.utilisateur_id = u.id
-      WHERE d.id = ? AND d.statut = 'TRANSMISE_AU_MINISTRE'
+      WHERE d.id = ? AND d.statut IN ('TRANSMISE_AU_MINISTRE', 'TRANSMISE_MINISTERE')
     `,
         [dossierId]
       );
@@ -9369,11 +9367,12 @@ app.post(
 
       // Créer une notification pour le demandeur
       await conn.execute(
-        "INSERT INTO notifications (utilisateur_id, type, message, lu, created_at) VALUES (?, ?, ?, 0, NOW())",
+        "INSERT INTO notifications (utilisateur_id, type, message, lu, created_at, lien) VALUES (?, ?, ?, 0, NOW(), ?)",
         [
           dossierData.utilisateur_id,
           "AUTORISATION_SIGNEE",
           `🎉 Félicitations ! Votre autorisation ${dossierData.reference} a été signée par le ministre et est maintenant disponible pour téléchargement.`,
+          pdfPath
         ]
       );
 
@@ -9387,73 +9386,6 @@ app.post(
     } catch (err) {
       console.error("Erreur lors de la signature:", err);
       res.status(500).json({ error: "Erreur serveur : " + err.message });
-    }
-  }
-);
-
-// Signer électroniquement un dossier
-app.post(
-  "/api/ministere/dossiers/:id/signer",
-  authMinistre,
-  async (req, res) => {
-    const { signature_type, signature_data } = req.body;
-    const dossierId = req.params.id;
-
-    try {
-      const conn = await mysql.createConnection(dbConfig);
-
-      // Vérifier que le dossier existe et est en attente de signature
-      const [dossier] = await conn.execute(
-        `
-      SELECT d.*, u.nom as demandeur_nom, u.prenom as demandeur_prenom, u.email as demandeur_email
-      FROM demandes d
-      JOIN utilisateurs u ON d.utilisateur_id = u.id
-      WHERE d.id = ? AND d.statut = 'TRANSMISE_AU_MINISTRE'
-    `,
-        [dossierId]
-      );
-
-      if (dossier.length === 0) {
-        await conn.end();
-        return res.status(404).json({ error: "Dossier non trouvé" });
-      }
-
-      // Mettre à jour le statut
-      await conn.execute(
-        "UPDATE demandes SET statut = ?, updated_at = NOW() WHERE id = ?",
-        ["AUTORISATION_SIGNEE", dossierId]
-      );
-
-      // Enregistrer dans l'historique
-      await enregistrerSuivi(
-        conn,
-        dossierId,
-        req.user.id,
-        "SIGNATURE_AUTORISATION",
-        "Autorisation signée électroniquement par le ministre et est maintenant disponible pour téléchargement.",
-        "TRANSMISE_AU_MINISTRE",
-        "AUTORISATION_SIGNEE"
-      );
-
-      // Notification au demandeur
-      await conn.execute(
-        'INSERT INTO notifications (utilisateur_id, type, message, lu, created_at) VALUES (?, "AUTORISATION_SIGNEE", ?, 0, NOW())',
-        [
-          dossier[0].utilisateur_id,
-          `Votre autorisation ${dossier[0].reference} a été signée par le ministre et est maintenant disponible pour téléchargement.`,
-        ]
-      );
-
-      await conn.end();
-
-      res.json({
-        success: true,
-        message: "Autorisation signée avec succès",
-      });
-    } catch (err) {
-      if (conn) await conn.end();
-      console.error("Erreur lors de la signature:", err);
-      res.status(500).json({ error: "Erreur serveur lors de la signature" });
     }
   }
 );
@@ -9773,7 +9705,7 @@ app.get(
       const conn = await mysql.createConnection(dbConfig);
 
       const [rows] = await conn.execute(
-        `SELECT r.*, u.nom, u.prenom 
+        `SELECT r.*, u.nom_responsable, u.prenom_responsable 
        FROM relances r 
        LEFT JOIN utilisateurs u ON u.id = r.utilisateur_id
        WHERE r.demande_id = ? 
@@ -9786,7 +9718,7 @@ app.get(
       const relances = rows.map((row) => ({
         ...row,
         utilisateur: row.utilisateur_id
-          ? `${row.nom} ${row.prenom}`
+          ? `${row.nom_responsable} ${row.prenom_responsable}`
           : "Système",
       }));
 
@@ -9863,9 +9795,7 @@ app.post(
     }
   }
 );
-
 // =================== ENDPOINTS DE NOTIFICATION AVANCÉS ===================
-
 // POST /api/notifications/envoyer - Envoi de notification personnalisée
 app.post(
   "/api/notifications/envoyer",
@@ -9994,42 +9924,74 @@ app.get("/api/download-autorisation/:reference", async (req, res) => {
   try {
     const conn = await mysql.createConnection(dbConfig);
 
-    // Récupérer la demande par référence
+    // Récupérer la demande par référence (ne pas sélectionner de colonne inexistante)
     const [[demande]] = await conn.execute(
-      "SELECT d.*, u.id as user_id FROM demandes d JOIN utilisateurs u ON d.utilisateur_id = u.id WHERE d.reference = ?",
+      "SELECT reference, id, autorisation_pdf FROM demandes WHERE reference = ?",
       [reference]
     );
 
-    if (!demande) {
-      await conn.end();
-      return res.status(404).json({ error: "Demande non trouvée" });
+    // 1) Si un chemin de fichier est défini, servir le fichier depuis uploads
+    if (demande && demande.autorisation_pdf) {
+      const filePath = path.join(__dirname, "uploads", demande.autorisation_pdf);
+      if (fs.existsSync(filePath)) {
+        await conn.end();
+        return res.download(filePath, `autorisation_${reference}.pdf`);
+      }
     }
 
-    if (!demande.fichier_autorisation) {
+    // 2) Fallback: aller chercher dans les archives (BLOB)
+    const [[archive]] = await conn.execute(
+      "SELECT reference, fichier_autorisation FROM archive_demandes WHERE reference = ?",
+      [reference]
+    );
+
+    if (archive && archive.fichier_autorisation && Buffer.isBuffer(archive.fichier_autorisation)) {
       await conn.end();
-      return res
-        .status(404)
-        .json({ error: "Aucune autorisation disponible pour cette demande" });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=\"autorisation_${reference}.pdf\"`
+      );
+      res.setHeader("Content-Length", archive.fichier_autorisation.length);
+      return res.end(archive.fichier_autorisation);
+    }
+
+    // 3) Dernier recours: reconstruire le PDF à la volée si la demande existe
+    if (demande && demande.id) {
+      const [[demandeFull]] = await conn.execute(
+        "SELECT * FROM demandes WHERE id = ?",
+        [demande.id]
+      );
+      const [signRecords] = await conn.execute(
+        `SELECT u.* FROM suivi_demandes s JOIN utilisateurs u ON s.utilisateur_id = u.id 
+         WHERE s.demande_id = ? AND s.action IN ("SIGNATURE_MINISTRE", "SIGNATURE_AUTORISATION") 
+         ORDER BY s.date_action DESC LIMIT 1`,
+        [demande.id]
+      );
+
+      try {
+        const ministerUser = signRecords && signRecords[0] ? signRecords[0] : { id: 0 };
+        const buffer = await generateAutorisationOfficielle(demandeFull, ministerUser);
+        await conn.end();
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename=\"autorisation_${reference}.pdf\"`
+        );
+        return res.end(buffer);
+      } catch (rebuildErr) {
+        console.error("Reconstruction PDF autorisation échouée:", rebuildErr);
+        await conn.end();
+        return res
+          .status(404)
+          .json({ error: "Aucune autorisation disponible pour cette demande" });
+      }
     }
 
     await conn.end();
-
-    // Construire le chemin complet du fichier
-    const filePath = path.join(
-      __dirname,
-      "uploads",
-      demande.fichier_autorisation
-    );
-
-    // Vérifier que le fichier existe
-    if (!fs.existsSync(filePath)) {
-      return res
-        .status(404)
-        .json({ error: "Fichier d'autorisation introuvable" });
-    }
-
-    // Envoyer le fichier
-    res.download(filePath, `autorisation_${demande.reference}.pdf`);
+    return res
+      .status(404)
+      .json({ error: "Aucune autorisation disponible pour cette demande" });
   } catch (err) {
     console.error("Erreur lors du téléchargement de l'autorisation:", err);
     res.status(500).json({ error: "Erreur serveur lors du téléchargement" });
