@@ -514,83 +514,83 @@ async function generateAccusePDF(demande, user) {
       )
       .moveDown(2);
 
-    // Tampon officiel exactement comme l'image - Direction Générale de l'Industrie
+    // Tampon officiel identique à tampon.jpg - Direction Générale de l'Industrie
     doc.moveDown(3);
 
     // Position pour centrer le tampon
-    const stampWidth = 240;
-    const stampHeight = 160;
+    const stampWidth = 280;
+    const stampHeight = 180;
     const stampX = (doc.page.width - stampWidth) / 2;
     const stampY = doc.y;
 
-    // Rectangle du tampon avec coins arrondis et bordure bleue épaisse
+    // Rectangle du tampon avec bordure bleue épaisse
     doc
       .rect(stampX, stampY, stampWidth, stampHeight)
       .lineWidth(4)
       .strokeColor("#1e6a8e")
       .stroke();
 
-    // Texte "Direction Générale de l'Industrie" en haut du tampon (centré)
+    // Texte "Direction Générale de l'Industrie" parfaitement centré en haut
     doc
-      .fontSize(14)
+      .fontSize(16)
       .font("Helvetica-Bold")
       .fillColor("#1e6a8e")
       .text(
         "Direction Générale de l'Industrie",
-        stampX + stampWidth / 2,
-        stampY + 25,
-        { align: "center", width: stampWidth - 20 }
+        stampX,
+        stampY + 20,
+        { align: "center", width: stampWidth }
       );
 
     // Ligne "Arrivée. le" avec date (gauche, bien espacée)
     doc
-      .fontSize(12)
+      .fontSize(13)
       .font("Helvetica-Bold")
       .fillColor("#1e6a8e")
-      .text("Arrivée. le", stampX + 20, stampY + 60);
+      .text("Arrivée. le", stampX + 25, stampY + 70);
 
     // Ligne de soulignement bleue épaisse pour la date (étendue jusqu'au bord droit)
     doc
-      .moveTo(stampX + 20, stampY + 80)
-      .lineTo(stampX + stampWidth - 20, stampY + 80)
+      .moveTo(stampX + 25, stampY + 95)
+      .lineTo(stampX + stampWidth - 25, stampY + 95)
       .lineWidth(3)
       .strokeColor("#1e6a8e")
       .stroke();
 
     // Date de la demande (sur la ligne, centrée)
     doc
-      .fontSize(11)
+      .fontSize(12)
       .font("Helvetica")
       .fillColor("#1e6a8e")
       .text(
         new Date(demande.created_at).toLocaleDateString("fr-FR"),
-        stampX + 20,
-        stampY + 85,
-        { width: stampWidth - 40, align: "center" }
+        stampX + 25,
+        stampY + 100,
+        { width: stampWidth - 50, align: "center" }
       );
 
     // Ligne "N°:" avec référence (gauche, bien espacée)
     doc
-      .fontSize(12)
+      .fontSize(13)
       .font("Helvetica-Bold")
       .fillColor("#1e6a8e")
-      .text("N°:", stampX + 20, stampY + 110);
+      .text("N°:", stampX + 25, stampY + 130);
 
     // Ligne de soulignement bleue épaisse pour la référence (étendue jusqu'au bord droit)
     doc
-      .moveTo(stampX + 20, stampY + 130)
-      .lineTo(stampX + stampWidth - 20, stampY + 130)
+      .moveTo(stampX + 25, stampY + 155)
+      .lineTo(stampX + stampWidth - 25, stampY + 155)
       .lineWidth(3)
       .strokeColor("#1e6a8e")
       .stroke();
 
     // Référence de la demande (sur la ligne, centrée)
     doc
-      .fontSize(11)
+      .fontSize(12)
       .font("Helvetica")
       .fillColor("#1e6a8e")
-      .text(demande.reference, stampX + 20, stampY + 135, {
-        width: stampWidth - 40,
+      .text(demande.reference, stampX + 25, stampY + 160, {
+        width: stampWidth - 50,
         align: "center",
       });
 
@@ -599,16 +599,6 @@ async function generateAccusePDF(demande, user) {
 
     doc.moveDown(4);
 
-    // Signature administrative
-    doc
-      .fontSize(11)
-      .fillColor("#222")
-      .font("Helvetica")
-      .text(`Fait à Nouakchott, le ${currentDate.toLocaleDateString("fr-FR")}`)
-      .moveDown(1)
-      .text("Pour le Ministère des Mines et de l'Industrie")
-      .text("Le Secrétariat Central")
-      .moveDown(3);
 
     // Pied de page
     doc
@@ -2789,7 +2779,7 @@ app.get(
         .fillColor("#1e6a8e")
         .text(
           "Direction Générale de l'Industrie",
-          stampX + stampWidth / 2,
+          stampX + 10,
           stampY + 25,
           { align: "center", width: stampWidth - 20 }
         );
@@ -3075,7 +3065,7 @@ app.get("/api/demandes/:id/document-enregistrement", async (req, res) => {
       .fillColor("#1e6a8e")
       .text(
         "Direction Générale de l'Industrie",
-        stampX + stampWidth / 2,
+        stampX + 10,
         stampY + 25,
         { align: "center", width: stampWidth - 20 }
       );
@@ -7770,14 +7760,25 @@ async function generateAutorisationOfficielle(demande, ministre) {
 
       doc.moveDown(1);
 
-      // Objet - Personnalisé avec le vrai type de demande
+      // Objet - Personnalisé avec le vrai type de demande ou l'activité principale
       const typeDemande = demande.type || "activité industrielle";
+      let activitePrincipale = null;
+      try {
+        const donneesObj = typeof demande.donnees === "string" ? JSON.parse(demande.donnees || '{}') : (demande.donnees || {});
+        activitePrincipale =
+          donneesObj.activite_principale ||
+          donneesObj["activité_principale"] ||
+          donneesObj.activite ||
+          donneesObj["activité"] ||
+          null;
+      } catch (_) {}
+      const objetTexte = activitePrincipale
+        ? `Objet : Autorisation d'installation de ${activitePrincipale}`
+        : `Objet : Autorisation d'Installation d'une unité de ${typeDemande}`;
       doc
         .fontSize(12)
         .font("Helvetica-Bold")
-        .text(
-          `Objet : Autorisation d'Installation d'une unité de ${typeDemande}`
-        );
+        .text(objetTexte);
 
       // Référence et date
       const dateSignature = new Date().toLocaleDateString("fr-FR");
@@ -7925,8 +7926,8 @@ async function generateAutorisationOfficielle(demande, ministre) {
           // Connexion temporaire pour chercher la signature
           const conn = await mysql.createConnection(dbConfig);
           try {
-            // Chercher dans la table signatures_ministre
-            const [signatures] = await conn.execute(
+            // Chercher dans la table signatures_ministre (ACTIVE)
+            let [signatures] = await conn.execute(
               `
               SELECT fichier_signature, type_signature 
               FROM signatures_ministre 
@@ -7936,6 +7937,28 @@ async function generateAutorisationOfficielle(demande, ministre) {
             `,
               [ministre.id]
             );
+
+            // Si aucune signature ACTIVE, prendre la plus récente pour ce ministre
+            if (signatures.length === 0) {
+              [signatures] = await conn.execute(
+                `SELECT fichier_signature, type_signature 
+                 FROM signatures_ministre 
+                 WHERE utilisateur_id = ?
+                 ORDER BY date_creation DESC 
+                 LIMIT 1`,
+                [ministre.id]
+              );
+            }
+
+            // En dernier recours: prendre la plus récente globale
+            if (signatures.length === 0) {
+              [signatures] = await conn.execute(
+                `SELECT fichier_signature, type_signature 
+                 FROM signatures_ministre 
+                 ORDER BY date_creation DESC 
+                 LIMIT 1`
+              );
+            }
 
             if (signatures.length > 0) {
               const signature = signatures[0];
@@ -7953,7 +7976,7 @@ async function generateAutorisationOfficielle(demande, ministre) {
                 )}`;
                 signatureType = "upload";
                 console.log(
-                  `      🖼️ [AUTORISATION] Signature uploadée trouvée en base: ${signaturePath}`
+                  `      🖼️ [AUTORISATION] Signature uploadée trouvée: ${signaturePath}`
                 );
               }
             }
@@ -7974,59 +7997,66 @@ async function generateAutorisationOfficielle(demande, ministre) {
 
       // 🎨 AFFICHAGE DE LA SIGNATURE
       if (signatureData && signatureType === "upload") {
-        // Signature uploadée (image) - À GAUCHE
+        // Signature uploadée (image) - CENTRÉE EN BAS
         try {
           console.log(
-            `      🖼️ [AUTORISATION] Ajout signature uploadée à gauche...`
+            `      🖼️ [AUTORISATION] Ajout signature uploadée centrée en bas...`
           );
           const signatureBuffer = Buffer.from(
             signatureData.split(",")[1],
             "base64"
           );
-          doc.image(signatureBuffer, 50, doc.y + 20, {
-            width: 120,
-            height: 60,
+          const targetWidth = 140; // largeur souhaitée
+          const targetHeight = 70; // hauteur approximative
+          const x = (doc.page.width - targetWidth) / 2;
+          const y = doc.page.height - doc.page.margins.bottom - targetHeight - 20;
+          doc.image(signatureBuffer, x, y, {
+            width: targetWidth,
+            height: targetHeight,
           });
           doc.moveDown(1);
           console.log(
-            `      ✅ [AUTORISATION] Signature uploadée affichée à gauche`
+            `      ✅ [AUTORISATION] Signature uploadée affichée centrée en bas`
           );
         } catch (signatureError) {
           console.log(
             `      ⚠️ [AUTORISATION] Erreur signature image: ${signatureError.message}`
           );
-          // Fallback: signature électronique
+          // Fallback: signature électronique centrée
+          const y = doc.page.height - doc.page.margins.bottom - 40;
           doc
             .fontSize(12)
             .font("Helvetica")
-            .text("✍️ Signature électronique du ministre", { align: "left" });
+            .text("✍️ Signature électronique du ministre", 0, y, { align: "center" });
         }
       } else if (signatureData && signatureType === "electronique") {
-        // Signature électronique (texte) - À GAUCHE
+        // Signature électronique (texte) - CENTRÉE EN BAS
+        const y = doc.page.height - doc.page.margins.bottom - 40;
         doc
           .fontSize(12)
           .font("Helvetica")
-          .text(`✍️ ${signatureData}`, { align: "left" });
+          .text(`✍️ ${signatureData}`, 0, y, { align: "center" });
         console.log(
-          `      ✅ [AUTORISATION] Signature électronique affichée à gauche`
+          `      ✅ [AUTORISATION] Signature électronique affichée centrée en bas`
         );
       } else {
-        // Aucune signature trouvée - Signature par défaut à gauche
+        // Aucune signature trouvée - Texte par défaut centré en bas
+        const y = doc.page.height - doc.page.margins.bottom - 40;
         doc
           .fontSize(12)
           .font("Helvetica")
-          .text("✍️ Signature électronique du ministre", { align: "left" });
+          .text("✍️ Signature électronique du ministre", 0, y, { align: "center" });
         console.log(
-          `      ⚠️ [AUTORISATION] Aucune signature trouvée, utilisation signature par défaut`
+          `      ⚠️ [AUTORISATION] Aucune signature trouvée, utilisation signature par défaut (centrée)`
         );
       }
 
-      // Nom du ministre à gauche
-      doc.moveDown(0.5);
+      // Nom du ministre centré sous la signature
+      const nameY = doc.page.height - doc.page.margins.bottom - 20;
       doc
         .fontSize(12)
         .font("Helvetica-Bold")
-        .text("THIAM Tidjani", { align: "left" });
+        .text("THIAM Tidjani", 0, nameY, { align: "center" });
 
       // Finalisation
       console.log(`      🏁 [AUTORISATION] Finalisation...`);
@@ -8194,7 +8224,6 @@ app.get("/api/ministere/signatures", authMinistre, async (req, res) => {
       .json({ error: "Erreur lors de la récupération des signatures" });
   }
 });
-
 // Supprimer une signature
 app.delete("/api/ministere/signatures/:id", authMinistre, async (req, res) => {
   try {
@@ -8951,7 +8980,6 @@ app.post("/api/pnme/demandes/:id/valider", authPNME, async (req, res) => {
     res.status(500).json({ error: "Erreur lors de la validation" });
   }
 });
-
 // Rejet d'une demande PNME
 app.post("/api/pnme/demandes/:id/rejeter", authPNME, async (req, res) => {
   const { id } = req.params;
